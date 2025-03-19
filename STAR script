@@ -1,0 +1,19 @@
+STAR --runThreadN 16 \
+     --genomeDir /home/dell/data/star_2.7.11a/mm10_index/ \
+     --readFilesCommand zcat \
+     --readFilesIn ./ISSAAC-5P-RNA_cortex_CB_R1.fastq.gz ./JZ24252891-241225-ISSAAC-5P-6N-RNA-241225-ISSAAC-5P-6N-RNA_combined_R3.fastq.gz \
+     --outFileNamePrefix /home/dell/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-141457/star_50/ \
+     --soloBarcodeMate 1 --chimOutType WithinBAM --clip5pNbases 24 0 \
+     --clip3pNbases 92 100 \
+     --soloType CB_UMI_Simple \
+     --soloCBwhitelist /home/dell/reference/737K-cratac-v1_rc.txt \
+     --soloCBstart 1 --soloCBlen 16 \
+     --soloUMIstart 17 --soloUMIlen 8 \
+     --soloStrand Reverse \
+     --soloCBmatchWLtype 1MM_multi \
+     --soloCellFilter EmptyDrops_CR \
+     --soloFeatures GeneFull \
+     --outFilterMultimapNmax 4 \
+     --outSAMattributes CB UB \
+     --soloBarcodeReadLength 0 \
+     --outSAMtype BAM SortedByCoordinate
