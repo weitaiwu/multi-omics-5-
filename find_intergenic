@@ -1,0 +1,19 @@
+grep -w "gene" Mus_musculus.GRCm39.113.gff3.gz| awk 'BEGIN{OFS="\t"}{print $1, $4-1, $5, ".", ".", $7}' > mm10.genes.bed
+
+bedtools sort -i mm10.genes.bed | bedtools merge -i - > merged_genes.bed
+
+sed -i 's/^/chr/' merged_genes.bed
+
+sed '1d' mm10.genome > mm10.genome_size
+
+# 提取基因组文件中定义的染色体列表
+cut -f1 mm10.genome_size > valid_chromosomes.txt
+
+# 过滤 BED 文件，仅保留基因组文件中存在的染色体
+awk 'BEGIN {FS=OFS="\t"} NR==FNR {chrom[$1]; next} $1 in chrom' valid_chromosomes.txt merged_genes.bed > merged_genes_filtered.bed
+
+bedtools sort -i merged_genes_filtered.bed -g mm10.genome_size > merged_genes_sorted.bed
+
+bedtools complement -i merged_genes_sorted.bed -g mm10.genome_size > mm10_intergenic.bed
+
+bedtools intersect -a paraclu_1_overlap.bed -b mm10_intergenic.bed  -u > 1_unique_overlap.bed
