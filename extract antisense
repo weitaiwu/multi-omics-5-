@@ -1,0 +1,39 @@
+# 从GTF提取正向基因区域
+gzip -dc Mus_musculus.GRCm39.113.gff3.gz | awk -F'\t' '
+    $3 == "gene" && $7 == "+" {
+        # 使用 split 提取 ID 属性
+        split($9, attr, ";");
+        id = "";
+        for (i in attr) {
+            if (attr[i] ~ /^ID=/) {
+                split(attr[i], parts, "=");
+                id = parts[2];
+                break;
+            }
+        }
+        if (id == "") id = "unknown";
+        print $1, $4-1, $5, id "_+", ".", $7
+    }' OFS='\t' > genes_plus.bed
+
+# 从GTF提取反向基因区域
+gzip -dc Mus_musculus.GRCm39.113.gff3.gz | awk -F'\t' '
+    $3 == "gene" && $7 == "-" {
+        split($9, attr, ";");
+        id = "";
+        for (i in attr) {
+            if (attr[i] ~ /^ID=/) {
+                split(attr[i], parts, "=");
+                id = parts[2];
+                break;
+            }
+        }
+        print $1, $4-1, $5, id "_-", ".", $7
+    }' OFS='\t' > genes_minus.bed
+
+awk 'BEGIN{OFS="\t"} {gsub(/^chr/, "", $1); $1 = "chr"$1; print}' genes_plus.bed > genes_plus_chr.bed
+awk 'BEGIN{OFS="\t"} {gsub(/^chr/, "", $1); $1 = "chr"$1; print}' genes_minus.bed > genes_minus_chr.bed
+samtools view -bh -F 16 cluster_0.bam | bedtools intersect -a stdin -b genes_minus_chr.bed -S -wa > antisense_minus.bam
+samtools view -bh -F 16 cluster_0.bam | bedtools intersect -a stdin -b genes_plus_chr.bed -S -wa > antisense_plus.bam
+
+# 合并结果
+samtools merge antisense.bam antisense_plus.bam antisense_minus.bam
