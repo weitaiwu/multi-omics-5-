@@ -1,0 +1,18 @@
+zcat gencode.v44.annotation.gtf.gz | awk 'BEGIN{OFS="\t";} $3=="exon" {print $1,$4-1,$5}' | sort -k1,1 -k2,2n| bedtools merge > hg38.exon.sort.bedtools.merge.bed
+
+1.提取基因坐标
+zcat gencode.v44.annotation.gtf.gz | awk 'BEGIN{OFS="\t";} $3=="gene" {print $1,$4-1,$5}' | sort -k1,1V -k2,2n >hg38.gene.sort.bed
+
+2.利用基因坐标减去外显子坐标
+bedtools subtract -a hg38.gene.sort.bed -b hg38.exon.sort.bedtools.merge.bed > hg38.intron.bed
+
+3.按照染色体顺序排序
+cat hg38.intron.bed  | sort -k1,1V -k2,2n >hg38.intron.sort.bed
+
+4.合并内含子坐标
+bedtools merge -i hg38.intron.sort.bed > hg38.intron.sort.bedtools.merge.bed
+
+5.删除中间文件
+rm hg38.gene.sort.bed
+rm hg38.intron.bed
+rm hg38.intron.sort.bed
