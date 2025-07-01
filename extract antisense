@@ -42,11 +42,11 @@ samtools merge antisense.bam antisense_plus.bam antisense_minus.bam
 bedtools bamtobed -i antisense.bam > antisense_reads.bed
 
 # 步骤2: 与内含子ATAC peaks重叠
-bedtools intersect -a intron_atac_peaks.bed -b antisense_reads.bed -wa -wb > overlapped_regions.bed
+bedtools intersect -a overlap_peaks.bed -b antisense_reads.bed -wa -wb > overlapped_antisense_reads.bed
 
 # 可选：添加统计信息
-bedtools intersect -a intron_atac_peaks.bed -b antisense_reads.bed -c > peak_overlap_counts.bed
+bedtools intersect -a overlap_peaks.bed -b antisense_reads.bed -c > overlapped_antisense_reads_counts.bed
 
 # 步骤3: 提取特异性结果
-awk '{print $1,$2,$3,$4,$5,$6}' overlapped_regions.bed > overlapped_peaks.bed
-awk '{print $7,$8,$9,$10,$11,$12}' overlapped_regions.bed > overlapped_reads.bed
+awk '{print $1,$2,$3,$4,$5,$6}' overlapped_antisense_reads.bed > overlapped_peaks.bed
+awk '{print $7,$8,$9,$10,$11,$12}' overlapped_antisense_reads.bed > overlapped_reads.bed
