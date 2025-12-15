@@ -2,7 +2,7 @@
 
 
 atac_peaks="/home/dell/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/Sample_JZ24252890-241225-ISSAAC-5P-6N-ATAC-241225-ISSAAC-5P-6N-ATAC/macs2_pk/aggregate_peaks.narrowPeak"
-output_dir="overlap_results2"
+output_dir="overlap_results"
 
 
 mkdir -p "$output_dir"
