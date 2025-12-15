@@ -1,0 +1,11 @@
+conda activate wuwt
+
+bedtools merge -i 6N_unique_overlap.bed -c 4,5 -o sum,sum > merged.bed
+
+awk 'BEGIN{OFS="\t"}{print $1, $2, $3, $5}' merged.bed > temp.bed
+
+bedGraphToBigWig temp.bed GRCm39.genome.sizes 6N_intergenic.bw
+
+下载
+https://www.encodeproject.org/experiments/ENCSR491RBV/
+ENCFF053GHL.bw
