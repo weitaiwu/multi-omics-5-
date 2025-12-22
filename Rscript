@@ -1,0 +1,785 @@
+# Load packages
+library(Matrix)
+library(Signac)
+library(Seurat)
+library(GenomeInfoDb)
+library(EnsDb.Mmusculus.v79)
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+library(stringr)
+set.seed(1234)
+library(mgsub)
+library(stringi)
+
+cortex_6N.data <- Read10X(data.dir = "~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-141457/Sample_JZ24252891-241225-ISSAAC-5P-6N-RNA-241225-ISSAAC-5P-6N-RNA/mismatch2_2/Solo.out/GeneFull/filtered")
+cortex_dt.data <- Read10X(data.dir = "~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-141457/cut_mismatch2/Solo.out/GeneFull/filtered")
+#####SCENT
+mat_rna <- cortex_6N@assays$RNA$counts
+mat_atac <- atac@assays$peaks$counts
+meta <- cortex_6N@meta.data
+meta$log_UMI <- log(meta$nCount_RNA)
+meta$cell <- rownames(meta)
+genebed_loc <- "~/R/x86_64-pc-linux-gnu-library/4.3/A_scafe_test/cluster_CB_6N/overlap_results/genecode/mm10_genebody_500kb_sorted.bed"
+
+barcodes <- intersect(colnames(mat_rna) , colnames(mat_atac))
+
+SCENT_obj <- CreateSCENTObj(rna = mat_rna[,barcodes], atac = mat_atac[,barcodes], meta.data = meta[barcodes,],
+                            covariates = c("log_UMI","percent.mt"), 
+                            celltypes = "predicted_celltype")
+
+SCENT_obj <- CreatePeakToGeneList(SCENT_obj, genebed = genebed_loc,
+                                  nbatch = 1000,tmpfile="./temporary_atac_peak.bed",
+                                  intersectedfile="./temporary_atac_peak_intersected.bed.gz")
+
+saveRDS(SCENT_obj, file = "~/data/SCENT/SCENT_obj.rds")
+
+SCENT_obj@peak.info <- do.call(rbind, SCENT_obj@peak.info.list)
+rownames(SCENT_obj@peak.info) <- NULL
+SCENT_obj@celltypes <- "predicted.celltype"
+SCENT_obj <- SCENT_algorithm(object = SCENT_obj, celltype = "R21 Oligo", ncores = 6, regr = 'poisson', bin = TRUE)
+
+##########ChIPseeker
+library(ChIPseeker)
+# 三步走（提供TxDb注释、提供bed文件、进行注释）
+require(TxDb.Hsapiens.UCSC.hg19.knownGene)
+txdb = TxDb.Hsapiens.UCSC.hg19.knownGene
+f = getSampleFiles()[[4]]
+x = annotatePeak(f, tssRegion=c(-1000, 1000), TxDb=txdb)
+
+
+
+##ref RNA data
+expr_df <- read.csv("~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/mCortex_all_gene_expression_matrix.csv.gz", row.names = 1, check.names = FALSE)
+sparse_matrix <- as(as.matrix(expr_df), "dgCMatrix")
+
+ref_meta <- read.csv("~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/Sample_Info.csv.gz", row.names = 1)
+seurat_obj <- CreateSeuratObject(counts = sparse_matrix, meta.data = ref_meta,project = "MyProject")
+####
+cortex_6N <- CreateSeuratObject(counts = cortex_6N.data, project = "cortex_ISSAAC_5p", min.cells = 3, min.features = 200)
+cortex_6N[["percent.mt"]] <- PercentageFeatureSet(cortex_6N, pattern = "^mt-")
+cortex_6N <- subset(cortex_6N, subset = nFeature_RNA > 200  & percent.mt < 5 & nCount_RNA < 30000)
+VlnPlot(cortex_6N, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+mean_fea <- mean(cortex_6N@meta.data$nFeature_RNA)
+mean_cou <- mean(cortex_6N@meta.data$nCount_RNA)
+mid_fea <- median(cortex_6N@meta.data$nFeature_RNA)
+mid_cou <- median(cortex_6N@meta.data$nCount_RNA)
+cortex_6N <- NormalizeData(cortex_6N, normalization.method = "LogNormalize", scale.factor = 10000)
+cortex_6N <- FindVariableFeatures(cortex_6N, selection.method = "vst", nfeatures = 2500)
+cortex_6N <- ScaleData(cortex_6N, features = VariableFeatures(cortex_6N))
+cortex_6N <- RunPCA(cortex_6N, features = VariableFeatures(object = cortex_6N))
+DimPlot(cortex_6N, reduction = "pca") + NoLegend()
+ElbowPlot(cortex_6N)
+cortex_6N <- FindNeighbors(cortex_6N, dims = 1:30)
+cortex_6N <- FindClusters(cortex_6N, resolution = 1)
+cortex_6N <- RunUMAP(cortex_6N, dims = 1:30)
+DimPlot(cortex_6N, reduction = "umap",group.by = "seurat_clusters",label = TRUE, repel = TRUE)+ggtitle("RNA_UMAP by RNA_anno")
+DimPlot(cortex_6N, reduction = "umap",group.by = "predicted.celltype",label = TRUE, repel = TRUE)+ggtitle("RNA_UMAP by RNA_anno")
+
+
+cortex_dt <- CreateSeuratObject(counts = cortex_dt.data, project = "cortex_ISSAAC_5p_dt", min.cells = 3, min.features = 200)
+cortex_dt[["percent.mt"]] <- PercentageFeatureSet(cortex_dt, pattern = "^mt-")
+cortex_dt <- subset(cortex_dt, subset = nFeature_RNA > 200  & percent.mt < 5 & nCount_RNA < 30000)
+VlnPlot(cortex_dt, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+mean_fea_dt <- mean(cortex_dt@meta.data$nFeature_RNA)
+mean_cou_dt <- mean(cortex_dt@meta.data$nCount_RNA)
+mid_fea_dt <- median(cortex_dt@meta.data$nFeature_RNA)
+mid_cou_dt <- median(cortex_dt@meta.data$nCount_RNA)
+cortex_dt <- NormalizeData(cortex_dt, normalization.method = "LogNormalize", scale.factor = 10000)
+cortex_dt <- FindVariableFeatures(cortex_dt, selection.method = "vst", nfeatures = 2500)
+cortex_dt <- ScaleData(cortex_dt, features = VariableFeatures(cortex_dt))
+cortex_dt <- RunPCA(cortex_dt, features = VariableFeatures(object = cortex_dt))
+DimPlot(cortex_dt, reduction = "pca") + NoLegend()
+ElbowPlot(cortex_dt)
+cortex_dt <- FindNeighbors(cortex_dt, dims = 1:30)
+cortex_dt <- FindClusters(cortex_dt, resolution = 1)
+cortex_dt <- RunUMAP(cortex_dt, dims = 1:30)
+DimPlot(cortex_6N, reduction = "umap",group.by = "seurat_clusters",label = TRUE, repel = TRUE)+ggtitle("RNA_UMAP by RNA_anno")
+
+
+p1 <- VlnPlot(cortex_6N, features = c("nFeature_RNA", "nCount_RNA"), 
+              group.by = NULL, ncol = 2) + ggtitle("cortex_6N")
+
+p2 <- VlnPlot(cortex_dt, features = c("nFeature_RNA", "nCount_RNA"), 
+              group.by = NULL, ncol = 2) + ggtitle("cortex_dt")
+
+library(patchwork)
+p1 / p2
+
+
+
+
+
+
+
+##提取cell barcode##
+# 提取metadata中的聚类信息
+metadata <- cortex_6N@meta.data
+
+# 遍历每个cluster，保存对应的barcode
+for (cluster in unique(metadata$cross_annotation)) {
+  # 提取当前cluster的细胞barcode（行名）
+  cells <- rownames(metadata[metadata$cross_annotation == cluster, ])
+  
+  
+   writeLines(cells, paste0("cluster_", cluster, "_barcodes.txt"))
+}
+#######################################################################################################
+# 读取数据
+h5_file <- "/home/dell/data/SCAFE/sc_project/allen_atlas/expression_matrix.hdf5"
+data <- Read10X_h5("/home/dell/data/SCAFE/sc_project/allen_atlas/expression_matrix.hdf5", use.names = TRUE)
+seurat_obj <- CreateSeuratObject(data, project = "10X_Project", min.cells = 3, min.features = 200)
+
+# 处理 metadata
+metadata <- read.csv("path/to/metadata.csv", row.names = 1)
+rownames(metadata) <- paste0(rownames(metadata), "-1")  # 调整 ID 格式
+seurat_obj <- AddMetaData(seurat_obj, metadata)
+
+
+
+
+
+
+
+##########################################################################################################3
+##查看每个细胞类群中有多少细胞
+cluster_cell_counts <- table(cortex_6N@meta.data$seurat_clusters)
+print(cluster_cell_counts)
+library(dplyr)
+
+# 提取 metadata 中的关键列
+metadata <- cortex_6N@meta.data %>%
+  select(seurat_clusters, nFeature_RNA)
+
+# 按 cluster 分组计算统计量
+feature_stats <- metadata %>%
+  group_by(seurat_clusters) %>%
+  summarise(
+    mean_features = mean(nFeature_RNA),
+    median_features = median(nFeature_RNA),
+    min_features = min(nFeature_RNA),
+    max_features = max(nFeature_RNA)
+  )
+print(feature_stats)
+# 箱线图（按 cluster 分组）
+ggplot(metadata, aes(x = seurat_clusters, y = nFeature_RNA, fill = seurat_clusters)) +
+  geom_boxplot() +
+  labs(title = "Number of Features per Cluster", x = "Cluster", y = "nFeature_RNA")
+
+# 小提琴图（使用 Seurat）
+VlnPlot(
+  cortex_6N,
+  features = "nFeature_RNA",
+  group.by = "seurat_clusters",
+  pt.size = 0.1
+) + ggtitle("Features per Cluster")
+
+##cluster annotation
+
+markers <- FindAllMarkers(cortex_6N, only.positive = TRUE, min.pct = 0.01)
+top_markers <- head(markers, n = 10)
+markers_per_cluster <- FindAllMarkers(
+  cortex_6N, 
+  group.by = "seurat_clusters", # 按簇分组
+  min.pct = 0.01,          # 基因在簇中至少出现1%
+  logfc.threshold = 0.2,    # 对数折叠变化阈值
+  nfeatures = 10,         # 每个簇选前10基因
+  p.adjust.method = "BH"    # Benjamini-Hochberg校正
+)
+# 转换为数据框并按簇排序
+
+marker_table <- markers_per_cluster %>% 
+  as.data.frame() %>% 
+  group_by(cluster) %>% 
+  top_n(n = 10, wt = avg_log2FC) %>%  # 替换为正确的列名
+  ungroup()
+# 查看前几行
+print(head(marker_table))
+
+
+markers_ratio <- markers_per_cluster %>%
+  mutate(
+    pct.2 = ifelse(pct.2 == 0, 1e-5, pct.2), # 处理分母为零的情况
+    ratio = pct.1 / pct.2,                    # 计算比值
+    log_ratio = log2(ratio)                   # 可选：计算log2比值
+  ) %>%
+  group_by(cluster) 
+
+
+# 取pct.1 > 0.1且比值最大的前10个基因
+top_ratio_genes <- markers_ratio %>%
+  filter(pct.1 > 0.1) %>%                    # 新增过滤条件
+  arrange(cluster, desc(ratio)) %>%          # 按比值降序排序
+  slice_head(n = 10) %>%                     # 取每簇前10行
+  ungroup()
+
+# 取比值最小的基因（保持原逻辑，但可选是否过滤pct.1）
+bottom_ratio_genes <- markers_ratio %>%
+  filter(ratio > 0) %>%                      # 过滤ratio=0的基因
+  arrange(cluster, ratio) %>%                 # 按比值升序排序
+  slice_head(n = 10) %>%                      # 取每簇前10行
+  ungroup()
+
+final_genes <- bind_rows(
+  top_ratio_genes %>% mutate(direction = "max_ratio"),
+  bottom_ratio_genes %>% mutate(direction = "min_ratio")
+)
+
+#########findmarker_6N_ref####
+markers_per_cluster_6N_ref <- FindAllMarkers(
+  cortex_6N, 
+  group.by = "predicted.id", # 按簇分组
+  min.pct = 0.01,          # 基因在簇中至少出现1%
+  logfc.threshold = 0.2,    # 对数折叠变化阈值
+  nfeatures = 10,         # 每个簇选前10基因
+  p.adjust.method = "BH"    # Benjamini-Hochberg校正
+)
+# 转换为数据框并按簇排序
+
+marker_table_6N_ref <- markers_per_cluster_6N_ref %>% 
+  as.data.frame() %>% 
+  group_by(cluster) %>% 
+  top_n(n = 10, wt = avg_log2FC) %>%  # 替换为正确的列名
+  ungroup()
+# 查看前几行
+print(head(marker_table_6N_ref))
+
+
+markers_ratio_6N_ref <- markers_per_cluster_6N_ref %>%
+  mutate(
+    pct.2 = ifelse(pct.2 == 0, 1e-5, pct.2), # 处理分母为零的情况
+    ratio = pct.1 / pct.2,                    # 计算比值
+    log_ratio = log2(ratio)                   # 可选：计算log2比值
+  ) %>%
+  group_by(cluster) 
+
+
+# 取pct.1 > 0.1且比值最大的前10个基因
+top_ratio_genes_6N_ref <- markers_ratio_6N_ref %>%
+  filter(pct.1 > 0.1) %>%                    # 新增过滤条件
+  arrange(cluster, desc(ratio)) %>%          # 按比值降序排序
+  slice_head(n = 10) %>%                     # 取每簇前10行
+  ungroup()
+
+# 取比值最小的基因（保持原逻辑，但可选是否过滤pct.1）
+bottom_ratio_genes_6N_ref <- markers_ratio_6N_ref %>%
+  filter(ratio > 0) %>%                      # 过滤ratio=0的基因
+  arrange(cluster, ratio) %>%                 # 按比值升序排序
+  slice_head(n = 10) %>%                      # 取每簇前10行
+  ungroup()
+
+final_genes_6N_ref <- bind_rows(
+  top_ratio_genes %>% mutate(direction = "max_ratio"),
+  bottom_ratio_genes %>% mutate(direction = "min_ratio")
+)
+
+write.xlsx(final_genes_6N_ref, file = "final_genes_6N_ref.xlsx", rowNames = FALSE)
+
+##ref RNA data
+expr_df <- read.csv("~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/mCortex_all_gene_expression_matrix.csv.gz", row.names = 1, check.names = FALSE)
+sparse_matrix <- as(as.matrix(expr_df), "dgCMatrix")
+
+
+ref_meta <- read.csv("~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/Sample_Info.csv.gz", row.names = 1)
+seurat_obj <- CreateSeuratObject(counts = sparse_matrix, meta.data = ref_meta,project = "MyProject")
+seurat_obj <- NormalizeData(seurat_obj)
+seurat_obj <- FindVariableFeatures(seurat_obj, nfeatures = 2000)
+seurat_obj <- ScaleData(seurat_obj, features = VariableFeatures(seurat_obj))
+seurat_obj <- RunPCA(seurat_obj, features = VariableFeatures(object = seurat_obj))
+DimPlot(seurat_obj, reduction = "pca") + NoLegend()
+ElbowPlot(seurat_obj)
+seurat_obj <- FindNeighbors(seurat_obj, dims = 1:30)
+seurat_obj <- FindClusters(seurat_obj, resolution = 1)
+
+seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 200  & percent.mt < 5 &nCount_RNA <30000)
+VlnPlot(seurat_obj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+
+# 按cluster分组计算均值
+cluster_stats <- seurat_obj@meta.data %>%
+  group_by(RNA_Cluster_Annotation) %>%  # 替换为你的cluster列名（如"seurat_clusters"）
+  summarise(
+    mean_features = mean(nFeature_RNA),
+    mean_counts = mean(nCount_RNA)
+  )
+
+# 查看结果
+print(cluster_stats, n = 25)  # 显示所有cluster
+mean_feature <- mean(seurat_obj@meta.data$nFeature_RNA)
+mean_counts <- mean(seurat_obj@meta.data$nCount_RNA)
+
+seurat_obj <- RunUMAP(
+  seurat_obj,
+  dims = 1:30,               
+  reduction = "pca",           
+  reduction.name = "umap",     
+  return.model = TRUE          
+)
+DimPlot(seurat_obj, reduction = "umap",group.by = "RNA_Cluster_Annotation", label = TRUE)
+
+Idents(seurat_obj) <- "RNA_Cluster_Annotation"
+markers_per_cluster2 <- FindAllMarkers(
+  seurat_obj, 
+  min.pct = 0.01,          # 基因在簇中至少出现1%
+  logfc.threshold = 0.2,    # 对数折叠变化阈值
+  nfeatures = 10,         # 每个簇选前10基因
+  p.adjust.method = "BH"    # Benjamini-Hochberg校正
+)
+# 转换为数据框并按簇排序
+
+marker_table2 <- markers_per_cluster2 %>% 
+  as.data.frame() %>% 
+  group_by(cluster) %>% 
+  top_n(n = 10, wt = avg_log2FC) %>%  # 替换为正确的列名
+  ungroup()
+# 查看前几行
+print(head(marker_table))
+
+
+markers_ratio2 <- markers_per_cluster2 %>%
+  mutate(
+    pct.2 = ifelse(pct.2 == 0, 1e-5, pct.2), # 处理分母为零的情况
+    ratio = pct.1 / pct.2,                    # 计算比值
+    log_ratio = log2(ratio)                   # 可选：计算log2比值
+  ) %>%
+  group_by(cluster) 
+
+
+# 取pct.1 > 0.1且比值最大的前10个基因
+top_ratio_genes2 <- markers_ratio2 %>%
+  filter(pct.1 > 0.1) %>%                    # 新增过滤条件
+  arrange(cluster, desc(ratio)) %>%          # 按比值降序排序
+  slice_head(n = 10) %>%                     # 取每簇前10行
+  ungroup()
+
+# 取比值最小的基因（保持原逻辑，但可选是否过滤pct.1）
+bottom_ratio_genes2 <- markers_ratio2 %>%
+  filter(ratio > 0) %>%                      # 过滤ratio=0的基因
+  arrange(cluster, ratio) %>%                 # 按比值升序排序
+  slice_head(n = 10) %>%                      # 取每簇前10行
+  ungroup()
+
+final_genes2 <- bind_rows(
+  top_ratio_genes2 %>% mutate(direction = "max_ratio"),
+  bottom_ratio_genes2 %>% mutate(direction = "min_ratio")
+)
+
+
+
+
+
+
+###ref annotation
+anchors <- FindTransferAnchors(
+  reference = seurat_obj,
+  query = cortex_6N,
+  reference.reduction = "pca",
+  dims = 1:30
+)
+
+predictions <- TransferData(
+  anchorset = anchors,
+  refdata = seurat_obj$RNA_Cluster_Annotation,
+  dims = 1:30
+)
+cortex_6N <- MapQuery(
+  anchorset = anchors,
+  query = cortex_6N,
+  reference = seurat_obj,
+  refdata = list(celltype = "RNA_Cluster_Annotation"),
+  reduction.model = "umap"  # 参考数据集使用的 UMAP 模型
+)
+cortex_6N <- AddMetaData(cortex_6N, predictions)
+##图注排序
+# 加载包（用于自然排序）
+library(gtools)
+# 提取所有唯一的 predicted.id 并按自然顺序排序
+unique_labels <- mixedsort(unique(cortex_6N$predicted.id))
+
+# 查看排序后的结果# 查看排序后的结果cortex_6N
+print(unique_labels)
+# 强制设置因子顺序
+cortex_6N@meta.data$predicted.id <- factor(
+  cortex_6N@meta.data$predicted.id,
+  levels = unique_labels  # 按自然顺序排序后的唯一值
+)
+# 验证因子顺序
+print(levels(cortex_6N$predicted.id))
+Idents(cortex_6N) <- cortex_6N@meta.data$predicted.id
+
+
+DimPlot(cortex_6N, reduction = "ref.umap", group.by = "predicted.id", label = TRUE)
+DimPlot(cortex_6N, reduction = "umap", group.by = "predicted.id", label = FALSE)
+DimPlot(cortex_6N, reduction = "umap", group.by = "seurat_clusters", label = TRUE)
+FeaturePlot(cortex_6N, features = c("Rbfox3","Slc32a1","Aqp4","Slc17a7"), pt.size = 0.1,reduction = "ref.umap", ncol = 2)
+
+
+#########ref_anno_2
+anchors <- FindTransferAnchors(
+  reference = seurat_obj,
+  query = cortex_dt,
+  reference.reduction = "pca",
+  dims = 1:30
+)
+
+predictions <- TransferData(
+  anchorset = anchors,
+  refdata = seurat_obj$RNA_Cluster_Annotation,
+  dims = 1:30
+)
+cortex_dt <- MapQuery(
+  anchorset = anchors,
+  query = cortex_dt,
+  reference = seurat_obj,
+  refdata = list(celltype = "RNA_Cluster_Annotation"),
+  reduction.model = "umap"  # 参考数据集使用的 UMAP 模型
+)
+cortex_dt <- AddMetaData(cortex_dt, predictions)
+##图注排序
+# 加载包（用于自然排序）
+library(gtools)
+# 提取所有唯一的 predicted.id 并按自然顺序排序
+unique_labels_dt <- mixedsort(unique(cortex_dt$predicted.id))
+
+# 查看排序后的结果# 查看排序后的结果cortex_dt
+print(unique_labels_dt)
+# 强制设置因子顺序
+cortex_dt@meta.data$predicted.id <- factor(
+  cortex_dt@meta.data$predicted.id,
+  levels = unique_labels_dt  # 按自然顺序排序后的唯一值
+)
+# 验证因子顺序
+print(levels(cortex_dt$predicted.id))
+Idents(cortex_dt) <- cortex_dt@meta.data$predicted.id
+
+
+DimPlot(cortex_dt, reduction = "ref.umap", group.by = "predicted.id", label = TRUE)
+DimPlot(cortex_dt, reduction = "umap", group.by = "predicted.id", label = FALSE)
+DimPlot(cortex_dt, reduction = "umap", group.by = "seurat_clusters", label = TRUE)
+FeaturePlot(cortex_dt, features = c("Rbfox3","Slc32a1","Aqp4","Slc17a7"), pt.size = 0.1,reduction = "ref.umap", ncol = 2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+################ATAC
+library(Signac)
+library(Seurat)
+library(GenomicRanges)
+library(future)
+library(ggplot2)
+library(patchwork)
+library(hdf5r)
+library(dplyr)
+library(readr)
+library(pheatmap)
+library(ggrepel)
+library(LSD)
+library(MASS)
+library(ensembldb)
+library(ggalt)
+library(GenomicRanges)
+
+# read the content from the 'outs' directory
+setwd("~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/outs/")
+mex_dir_path <- "~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/outs/filtered_mtx/"
+fragment_dir_path <- "~/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-041610/outs/"
+
+mtx_path <- paste(mex_dir_path, "matrix.mtx", sep = '')
+feature_path <- paste(mex_dir_path, "features.tsv", sep = '')
+barcode_path <- paste(mex_dir_path, "barcodes.tsv", sep = '')
+fragment_path <- paste(fragment_dir_path, "fragments.tsv.gz", sep = '')
+
+# features <- readr::read_tsv(feature_path, col_names = F) %>% tidyr::unite(feature)
+barcodes <- readr::read_tsv(barcode_path, col_names = F) %>% tidyr::unite(barcode)
+features <- readr::read_tsv(feature_path, col_names = F)
+
+
+# create a Signac chromatin assay and a Seurat object
+mtx <- Matrix::readMM(mtx_path) %>%
+  magrittr::set_rownames(features$X1) %>%
+  magrittr::set_colnames(barcodes$barcode)
+chrom_assay <- CreateChromatinAssay(
+  counts = mtx,
+  sep = c("-", "-"),
+  genome = 'mm10',
+  fragments = fragment_path
+)
+
+atac <- CreateSeuratObject(
+  counts = chrom_assay,
+  assay = 'peaks',
+  project = 'cortex_ISSAAC',
+)
+
+granges(atac)
+
+ensdb.cortex <- ensDbFromGtf(gtf = "~/data/SCAFE/ISSAAC_5p/data/cortex/ATAC/Mus_musculus.GRCm38.102.gtf.gz")
+ensdb.cortex <- EnsDb(ensdb.cortex)
+annotation.cortex <- GetGRangesFromEnsDb(ensdb.cortex)
+seqlevelsStyle(annotation.cortex) <- 'UCSC'
+genome(annotation.cortex) <- "mm10"
+Annotation(atac) <- annotation.cortex
+
+
+# Compute nucleosome signal per cell
+atac <- NucleosomeSignal(object = atac)
+atac$nucleosome_group <- ifelse(atac$nucleosome_signal > 4, 'NS > 4', 'NS < 4')
+FragmentHistogram(object = atac, group.by = 'nucleosome_group', region = 'chr1-1-10000000')
+# Compute TSS enrichment score per cell
+atac <- TSSEnrichment(object = atac, fast = FALSE)
+atac$log10_nFeature_peaks <- log10(atac$nFeature_peaks)
+atac$log10_nCount_peaks <- log10(atac$nCount_peaks)
+VlnPlot(atac , features = c("nFeature_peaks" , "nCount_peaks" , 
+                            "mt_content" , "mapping_rate" , 
+                            "sequencing_depth" , "uniq_nuc_frags" , 
+                            "nucleosome_signal" , "TSS.enrichment") , ncol = 2)
+VlnPlot(atac , features = c("log10_nFeature_peaks" , "log10_nCount_peaks" , 
+                            "mt_content" , "mapping_rate" , 
+                            "sequencing_depth" , "uniq_nuc_frags" , 
+                            "nucleosome_signal" , "TSS.enrichment") , ncol = 2)
+
+
+DensityScatter(atac, x = 'nCount_peaks', y = 'TSS.enrichment', log_x = TRUE, quantiles = TRUE)
+
+atac_original <- atac
+
+# atac <- subset(
+#   x = atac,
+#   subset = nCount_peaks > 6000 &
+#     nucleosome_signal < 4 &
+#     TSS.enrichment > 3
+# )
+
+
+##Normalization and linear dimensional reduction
+##评估每个peak在细胞间的重要性。
+atac <- RunTFIDF(atac)
+atac <- FindTopFeatures(atac, min.cutoff = 'q0')
+atac <- RunSVD(object = atac)
+DepthCor(atac)
+
+
+##Non-linear dimension reduction and clustering
+atac <- RunUMAP(
+  object = atac,
+  reduction = 'lsi',
+  dims = 2:30
+)
+atac <- FindNeighbors(
+  object = atac,
+  reduction = 'lsi',
+  dims = 2:30
+)
+atac <- FindClusters(
+  object = atac,
+  algorithm = 3,
+  resolution = 0.4,
+  verbose = FALSE
+)
+
+DimPlot(object = atac, label = FALSE) +ggtitle("ATAC_UMAP by ATAC_anno")
+FeaturePlot(object = atac, 
+            features = "nCount_peaks",
+            cols = c("lightgrey", "red"),  # 从浅灰到红色的渐变
+            order = TRUE,                  # 将高值点绘制在顶部
+            label = TRUE) + 
+  ggtitle("ATAC_UMAP by Peak Counts") +
+  scale_colour_gradientn(colours = rev(rainbow(4)))  # 可选：自定义渐变色
+
+atac$rna_cluster <- cortex_6N$seurat_clusters
+cortex_6N$atac_cluster <- atac$seurat_clusters
+atac$rna_ref_cluster <-cortex_6N$predicted.id
+
+DimPlot(object = atac, group.by = "rna_ref_cluster" ,label = FALSE, repel = TRUE)+ggtitle("ATAC_UMAP by RNA_anno")
+DimPlot(object = cortex_6N, group.by = "atac_cluster" ,label = TRUE, repel = TRUE) +ggtitle("RNA_UMAP by ATAC_anno")
+DimPlot(cortex_6N, reduction = "umap", group.by = "predicted.id", label = TRUE)+ggtitle("RNA_UMAP by RNA_anno")
+
+VlnPlot(atac,features = 'pct_reads_in_peaks',pt.size = 0.1)
+#####################new annotation######################
+cortex_6N@meta.data <- cortex_6N@meta.data %>%
+  mutate(
+    cross_annotation = case_when(
+      seurat_clusters == 5 & atac_cluster == 7 ~ "R5A7",
+      seurat_clusters == 5 & atac_cluster == 8 ~ "R5A8",
+      seurat_clusters == 4 & atac_cluster == 4 ~ "R4A4",
+      seurat_clusters == 6 & atac_cluster == 4 ~ "R6A4",
+      seurat_clusters == 10 & atac_cluster == 4 ~ "R10A4",
+      TRUE ~ as.character(seurat_clusters)                # 其他情况保留原始聚类
+    )
+  )
+
+cortex_6N@meta.data <- cortex_6N@meta.data %>%
+  mutate(
+    cross_annotation = case_when(
+      seurat_clusters == 3 & atac_cluster == 1 ~ "R3-A1",
+      seurat_clusters == 3 & atac_cluster == 4 ~ "R3-A4",
+      seurat_clusters == 4 & atac_cluster == 5 ~ "R4-A5",
+      seurat_clusters == 5 & atac_cluster == 7 ~ "R5-A7",
+      seurat_clusters == 5 & atac_cluster == 10 ~ "R5-A10",
+      seurat_clusters == 7 & atac_cluster == 4 ~ "R7-A4",
+      seurat_clusters == 8 & atac_cluster == 5 ~ "R8-A5",
+      seurat_clusters == 12 & atac_cluster == 4 ~ "R12-A4",
+      TRUE ~ as.character(seurat_clusters)                # 其他情况保留原始聚类
+    )
+  )
+
+cortex_6N$cross_annotation <- factor(cortex_6N$cross_annotation)
+DimPlot(cortex_6N, 
+        group.by = "cross_annotation", 
+        label = TRUE, 
+        repel = TRUE) + 
+  NoLegend() +
+  ggtitle("RNA_UMAP by crossanno")
+
+
+
+atac@meta.data <- atac@meta.data %>%
+  mutate(
+    combined_cluster = paste0("A", seurat_clusters, "_R", rna_cluster)  # 示例："A6_C2"
+  )
+
+
+DimPlot(atac, 
+        group.by = "combined_cluster", 
+        label = TRUE, 
+        repel = TRUE) + 
+  NoLegend() +
+  ggtitle("ATAC_UMAP by crossanno")
+
+atac@meta.data <- atac@meta.data %>%
+  mutate(
+    cross_annotation = case_when(
+      seurat_clusters == 0 & rna_cluster == 0 & rna_cluster == 1 & rna_cluster == 3 ~ "0-R013",
+      seurat_clusters == 2 &rna_cluster == 0 & rna_cluster == 1 & rna_cluster == 3 ~ "0-R013",
+      seurat_clusters == 3 &rna_cluster == 0 & rna_cluster == 1 & rna_cluster == 3~ "0-R013",
+      seurat_clusters == 4 &rna_cluster == 0 & rna_cluster == 1 & rna_cluster == 3 ~ "0-R013",
+      seurat_clusters == 5 & rna_cluster == 4 ~ "5-R4",
+      seurat_clusters == 5 & rna_cluster == 7 ~ "5-R7",
+      seurat_clusters == 5 & rna_cluster == 11 ~ "5-R11",
+      seurat_clusters == 6 & rna_cluster == 2 ~ "6-R2",
+      seurat_clusters == 8 & rna_cluster == 2 ~ "8-R2",
+      seurat_clusters == 9 & rna_cluster == 5 ~ "9-R5",
+      seurat_clusters == 10 & rna_cluster == 5 ~ "10-R5",
+      TRUE ~ as.character(seurat_clusters)                # 其他情况保留原始聚类
+    )
+  )
+
+atac$cross_annotation <- factor(atac$cross_annotation)
+
+DimPlot(atac, 
+        group.by = "cross_annotation", 
+        label = TRUE, 
+        repel = TRUE) + 
+  NoLegend() +
+  ggtitle("ATAC_UMAP by crossanno")
+########################################
+library(dplyr)
+library(tidyr)
+
+# 提取所有 prediction.score 列和 predicted.id
+score_columns <- grep("^prediction\\.score\\.", colnames(cortex_6N@meta.data), value = TRUE)
+meta_sub <- cortex_6N@meta.data %>%
+  select(predicted.id, all_of(prediction.score.*))
+
+# 重命名列以简化显示（可选）
+colnames(meta_sub) <- gsub("prediction\\.score\\.", "", colnames(meta_sub))
+colnames(meta_sub) <- gsub("\\.", " ", colnames(meta_sub))  # 将点替换为空格（例如 "R3 Ex L5 IT"）
+# 计算每个细胞类型的平均预测分数
+heatmap_data <- meta_sub %>%
+  group_by(predicted.id) %>%
+  summarise(across(everything(), mean, na.rm = TRUE)) %>%
+  column_to_rownames("predicted.id")
+
+# 移除全为 0 的列（可选）
+heatmap_data <- heatmap_data[, colSums(heatmap_data) > 0]
+library(pheatmap)
+
+pheatmap(
+  mat = heatmap_data,
+  color = colorRampPalette(c("navy", "white", "red"))(100),
+  cluster_rows = TRUE,   # 对行（细胞类型）聚类
+  cluster_cols = TRUE,   # 对列（预测分数）聚类
+  scale = "column",      # 按列标准化（Z-score）
+  fontsize_row = 10,
+  fontsize_col = 8,
+  angle_col = 45,
+  main = "Average Prediction Scores by Cell Type"
+)
+
+
+
+
+
+
+# 1. 获取共有的细胞ID
+common_cells <- intersect(Cells(cortex_6N), Cells(atac))
+
+# 2. 子集化两个对象只包含共有的细胞
+rna_common <- subset(cortex_6N, cells = common_cells)
+atac_common <- subset(atac, cells = common_cells)
+rna_umap <- as.data.frame(rna_common@reductions$umap@cell.embeddings)
+atac_umap <- atac_common@reductions$umap@cell.embeddings
+colnames(combined) <- c("RNA_umap1","RNA_umap2","ATAC_umap1","ATAC_umap2")
+combined$RNA_cluster <- rna_common$seurat_clusters
+combined$ATAC_cluster <- rna_common$atac_cluster
+combined$cross_cluster <- rna_common$cross_annotation
+ 
+# 1. 创建输出文件名
+output_file <- "my_dataframe.csv.gz"
+
+# 2. 使用 gzfile() 连接写入压缩文件
+write.csv(
+  combined,               # 要导出的数据框
+  file = gzfile(output_file),  # 指定压缩输出
+  row.names = TRUE,       # 是否包含行名
+  na = "",                 # 将NA替换为空字符串
+  quote = FALSE            # 不对文本添加引号，节省空间
+)
+
+# 3. 验证文件
+cat("文件已保存至:", normalizePath(output_file), "\n")
+cat("文件大小:", file.info(output_file)$size / 1024, "KB\n")
+
+
+
+
+
+
+library(Seurat)
+library(Matrix)
+library(data.table)
+
+# 从Seurat对象中获取原始计数矩阵
+raw_counts <- GetAssayData(cortex_6N, assay = "RNA", slot = "counts")
+
+# 转置矩阵：将细胞作为行，基因作为列
+counts_transposed <- t(raw_counts)
+
+# 转换为数据框并添加行名（细胞条形码）
+counts_df <- as.data.frame(as.matrix(counts_transposed))
+counts_df$cell_barcode <- rownames(counts_transposed)
+
+# 将细胞条形码设为第一列
+setcolorder(counts_df, "cell_barcode")
+
+# 显示部分数据
+head(counts_df[, 1:5])
+#
+output_file <- "raw_counts_matrix.csv.gz"
+
+# 方法1：直接导出（适合小型数据集）
+fwrite(counts_df, output_file, 
+       sep = ",", 
+       row.names = FALSE, 
+       col.names = TRUE, 
+       compress = "gzip",
+       verbose = TRUE)
