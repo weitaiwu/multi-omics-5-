@@ -1,0 +1,30 @@
+#bash command
+macs2 callpeak \
+  -t Aligned.sortedByCoord.out.bam \
+  -f BAM \
+  -g mm \
+  -n 6N \
+  --outdir 6N_macs2_out
+
+####in R
+BiocManager::install("TxDb.Mmusculus.UCSC.mm10.knownGene")
+BiocManager::install("org.Mm.eg.db")
+library(ChIPseeker)
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+library(org.Mm.eg.db)
+
+txdb <- TxDb.Mmusculus.UCSC.mm10.knownGene
+peak <- readPeakFile("~/data/6N_peaks.narrowPeak")
+peakAnno <- annotatePeak(
+  peak,
+  TxDb = txdb,
+  tssRegion = c(-3000, 3000),
+  annoDb = "org.Mm.eg.db"
+  )
+                     
+##结果检查
+anno_df <- as.data.frame(peakAnno)
+anno_df[[13]] <- sub("^Exon.*", "Exon", anno_df[,"annotation"])
+anno_df[[13]] <- sub("^Intron.*", "Intron", anno_df[,"annotation"])
+table(anno_df[,"annotation"])
+write.table(as.data.frame(peakAnno),file = "/path/to/download/location")                  
