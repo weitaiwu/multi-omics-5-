@@ -1,0 +1,18 @@
+STAR --runThreadN 8 \
+--genomeDir /home/dell/data/star_2.7.11a/mm10_index/ \
+--readFilesCommand zcat \
+--outFileNamePrefix /home/dell/data/SCAFE/ISSAAC_5p/data/ATAC_5pRNA/ZKBL-20241228-L-01-2025-01-141457/mismatch2/ \
+--readFilesIn ./split_check_R2R1.fastq.gz ./split_check_R3.fastq.gz \
+--soloType CB_UMI_Simple \
+--soloBarcodeMate 1 --clip5pNbases 24 0 \
+--soloCBstart 1 --soloCBlen 16 \
+--soloUMIstart 17 --soloUMIlen 8 \
+--soloCBwhitelist /home/dell/reference/737K-cratac-v1_rc.txt \
+--soloCellFilter EmptyDrops_CR \
+--soloStrand Forward \
+--outSAMattributes CB UB \
+--outSAMtype BAM SortedByCoordinate \
+--soloBarcodeReadLength 0 \
+--soloCBmatchWLtype 1MM_multi \
+--soloFeatures GeneFull \
+--outFilterMultimapNmax 4
